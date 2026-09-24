@@ -43,10 +43,10 @@ import static net.pcal.splitscreen.common.WindowStyle.WINDOWED;
 record WindowMode(
         String name,
         WindowStyle style,
-        Function<MinecraftWindow, Integer> xFn,
-        Function<MinecraftWindow, Integer> yFn,
-        Function<MinecraftWindow, Integer> widthFn,
-        Function<MinecraftWindow, Integer> heightFn) {
+        Function<MinecraftWindow.Rectangle, Integer> xFn,
+        Function<MinecraftWindow.Rectangle, Integer> yFn,
+        Function<MinecraftWindow.Rectangle, Integer> widthFn,
+        Function<MinecraftWindow.Rectangle, Integer> heightFn) {
 
     /**
      * @return an enum indicating the style for windows in this mode.
@@ -65,28 +65,32 @@ record WindowMode(
 
     /**
      * @return what the bounding rectangle for the given window would be if
-     * this mode's rules were applied to it.
+     * this mode's rules were applied to it, or null if the bounds are unavailable.
      */
-    MinecraftWindow.Rectangle getRepositionedBoundsFor(MinecraftWindow screenBounds) {
-        return new MinecraftWindow.Rectangle(xFn.apply(screenBounds), yFn.apply(screenBounds), widthFn.apply(screenBounds), heightFn.apply(screenBounds));
+    MinecraftWindow.Rectangle getRepositionedBoundsFor(MinecraftWindow window) {
+        if (style == FULLSCREEN) {
+            return new MinecraftWindow.Rectangle(-1, -1, -1, -1);
+        }
+        final MinecraftWindow.Rectangle bounds = style == SPLITSCREEN ? window.getScreenBounds() : window.getWindowBounds();
+        if (bounds == null) return null;
+        return new MinecraftWindow.Rectangle(xFn.apply(bounds), yFn.apply(bounds), widthFn.apply(bounds), heightFn.apply(bounds));
     }
 
     static List<WindowMode> getModes(int gap) {
         final List<WindowMode> modes = new ArrayList<>();
-        addMode(modes, "WINDOWED", WINDOWED, r -> r.getWindowBounds().x(), r -> r.getWindowBounds().y(),
-                r -> r.getWindowBounds().width(), r -> r.getWindowBounds().height());
-        addMode(modes, "LEFT", SPLITSCREEN, r -> 0, r -> 0, r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height());
-        addMode(modes, "RIGHT", SPLITSCREEN, r -> r.getScreenBounds().width() / 2 + gap, r -> 0, r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height());
-        addMode(modes, "TOP", SPLITSCREEN, r -> 0, r -> 0, r -> r.getScreenBounds().width(), r -> r.getScreenBounds().height() / 2 - gap);
-        addMode(modes, "BOTTOM", SPLITSCREEN, r -> 0, r -> r.getScreenBounds().height() / 2 + gap, r -> r.getScreenBounds().width(), r -> r.getScreenBounds().height() / 2 - gap);
-        addMode(modes, "TOP_LEFT", SPLITSCREEN, r -> 0, r -> 0,
-                r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height() / 2 - gap);
-        addMode(modes, "TOP_RIGHT", SPLITSCREEN, r -> r.getScreenBounds().width() / 2 + gap, r -> 0,
-                r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height() / 2 - gap);
-        addMode(modes, "BOTTOM_LEFT", SPLITSCREEN, r -> 0, r -> r.getScreenBounds().height() / 2 + gap,
-                r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height() / 2 - gap);
-        addMode(modes, "BOTTOM_RIGHT", SPLITSCREEN, r -> r.getScreenBounds().width() / 2 + gap, r -> r.getScreenBounds().height() / 2 + gap,
-                r -> r.getScreenBounds().width() / 2 - gap, r -> r.getScreenBounds().height() / 2 - gap);
+        addMode(modes, "WINDOWED", WINDOWED, r -> r.x(), r -> r.y(), r -> r.width(), r -> r.height());
+        addMode(modes, "LEFT", SPLITSCREEN, r -> r.x(), r -> r.y(), r -> r.width() / 2 - gap, r -> r.height());
+        addMode(modes, "RIGHT", SPLITSCREEN, r -> r.x() + r.width() / 2 + gap, r -> r.y(), r -> r.width() / 2 - gap, r -> r.height());
+        addMode(modes, "TOP", SPLITSCREEN, r -> r.x(), r -> r.y(), r -> r.width(), r -> r.height() / 2 - gap);
+        addMode(modes, "BOTTOM", SPLITSCREEN, r -> r.x(), r -> r.y() + r.height() / 2 + gap, r -> r.width(), r -> r.height() / 2 - gap);
+        addMode(modes, "TOP_LEFT", SPLITSCREEN, r -> r.x(), r -> r.y(),
+                r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
+        addMode(modes, "TOP_RIGHT", SPLITSCREEN, r -> r.x() + r.width() / 2 + gap, r -> r.y(),
+                r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
+        addMode(modes, "BOTTOM_LEFT", SPLITSCREEN, r -> r.x(), r -> r.y() + r.height() / 2 + gap,
+                r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
+        addMode(modes, "BOTTOM_RIGHT", SPLITSCREEN, r -> r.x() + r.width() / 2 + gap, r -> r.y() + r.height() / 2 + gap,
+                r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
         addMode(modes, "FULLSCREEN", FULLSCREEN, no(), no(), no(), no());
         return modes;
     }
@@ -97,14 +101,14 @@ record WindowMode(
     private static void addMode(List<WindowMode> modes,
                                 String name,
                                 WindowStyle style,
-                                Function<MinecraftWindow, Integer> xFn,
-                                Function<MinecraftWindow, Integer> yFn,
-                                Function<MinecraftWindow, Integer> widthFn,
-                                Function<MinecraftWindow, Integer> heightFn) {
+                                Function<MinecraftWindow.Rectangle, Integer> xFn,
+                                Function<MinecraftWindow.Rectangle, Integer> yFn,
+                                Function<MinecraftWindow.Rectangle, Integer> widthFn,
+                                Function<MinecraftWindow.Rectangle, Integer> heightFn) {
         modes.add(new WindowMode(name, style, xFn, yFn, widthFn, heightFn));
     }
 
-    private static Function<MinecraftWindow, Integer> no() {
+    private static Function<MinecraftWindow.Rectangle, Integer> no() {
         return r -> -1;
     }
 
