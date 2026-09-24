@@ -25,16 +25,15 @@
 package net.pcal.splitscreen.common.mixins;
 
 import com.mojang.blaze3d.platform.DisplayData;
-import com.mojang.blaze3d.platform.Monitor;
 import com.mojang.blaze3d.platform.MonitorManager;
-import com.mojang.blaze3d.platform.VideoMode;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.platform.WindowEventHandler;
-import com.mojang.blaze3d.systems.GpuBackend;
+import com.mojang.renderpearl.api.device.GpuBackend;
 import net.pcal.splitscreen.common.MinecraftWindow;
 import net.pcal.splitscreen.common.WindowStyle;
-import org.jetbrains.annotations.Nullable;
-import org.lwjgl.glfw.GLFW;
+import org.lwjgl.sdl.SDLVideo;
+import org.lwjgl.sdl.SDL_Rect;
+import org.lwjgl.system.MemoryStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -43,13 +42,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Optional;
-
 import static net.pcal.splitscreen.common.Mod.mod;
 import static net.pcal.splitscreen.common.logging.SystemLogger.syslog;
-import static org.lwjgl.glfw.GLFW.GLFW_DECORATED;
-import static org.lwjgl.glfw.GLFW.GLFW_FALSE;
-import static org.lwjgl.glfw.GLFW.GLFW_TRUE;
 
 /**
  * @author pcal
@@ -80,41 +74,34 @@ public abstract class WindowMixin implements MinecraftWindow {
     @Shadow
     private boolean fullscreen;
     @Shadow
-    private Optional<VideoMode> preferredFullscreenVideoMode;
-
-
-    @Shadow
-    public abstract boolean isFullscreen();
-
+    private boolean fullscreenRequested;
     @Shadow
     protected abstract void setMode();
-
-    @Shadow
-    @Nullable
-    public abstract Monitor findBestMonitor();
 
     // ======================================================================
     // Mixins
 
     @Inject(method = "<init>", at = @At(value = "TAIL"), remap = false)
-    private void Window(WindowEventHandler eventHandler, DisplayData displayData, String fullscreenVideoModeString, boolean exclusiveFullscreen, String title, MonitorManager monitorManager, GpuBackend backend, CallbackInfo ci) {
+    private void Window(WindowEventHandler eventHandler, DisplayData displayData, String fullscreenVideoModeString, boolean exclusiveFullscreen, String title, MonitorManager monitorManager, final GpuBackend backend, CallbackInfo ci) {
         mod().onWindowCreate(this);
     }
 
-    @Inject(method = "toggleFullScreen()V", at = @At("HEAD"), cancellable = true, remap = false)
-    public void splitscreen_toggleFullScreen(CallbackInfo ci) {
-        mod().onToggleFullscreen(this);
-        ci.cancel();
+    /**
+     * 26.3 removed Window.toggleFullScreen(); the F11 keybind and the fullscreen
+     * option both funnel through setFullscreen(boolean) instead.
+     */
+    @Inject(method = "setFullscreen(Z)V", at = @At("HEAD"), cancellable = true, remap = false)
+    private void splitscreen_setFullscreen(boolean requested, CallbackInfo ci) {
+        if (requested != this.fullscreenRequested) {
+            mod().onToggleFullscreen(this);
+            ci.cancel();
+        }
     }
 
-    @Inject(method = "onFramebufferResize(JII)V", at = @At("HEAD"), remap = false)
-    private void splitscreen_onFramebufferSizeChanged(long handle, int width, int height, CallbackInfo ci) {
-        if (handle == this.handle) mod().onResolutionChange(this);
-    }
-
-    @Inject(method = "setMode()V", at = @At("HEAD"), remap = false)
-    private void splitscreen_setMode(CallbackInfo ci) {
-        mod().onSetMode(this);
+    @Inject(method = "onFramebufferResize(II)V", at = @At("RETURN"), remap = false)
+    private void splitscreen_onFramebufferSizeChanged(int width, int height, CallbackInfo ci) {
+        // Mirror the vanilla guard; minimize fires framebuffer resize with zero sizes.
+        if (width > 0 && height > 0) mod().onResolutionChange(this);
     }
 
     // ======================================================================
@@ -129,18 +116,16 @@ public abstract class WindowMixin implements MinecraftWindow {
     @Override
     @Unique
     public Rectangle getScreenBounds() {
-        final Monitor monitor = this.findBestMonitor();
-        if (monitor == null) {
-            syslog().warn("Could not determine Monitor");
-            return null;
-        } else {
-            final VideoMode videoMode = monitor.getPreferredVidMode(this.preferredFullscreenVideoMode);
-            if (videoMode == null) {
-                syslog().warn("Could not determine VideoMode");
+        // Window placement uses desktop coordinates, not a preferred exclusive
+        // fullscreen resolution or framebuffer pixels (which may differ on HiDPI).
+        try (final MemoryStack stack = MemoryStack.stackPush()) {
+            final int display = SDLVideo.SDL_GetDisplayForWindow(this.handle);
+            final SDL_Rect bounds = SDL_Rect.malloc(stack);
+            if (display == 0 || !SDLVideo.SDL_GetDisplayBounds(display, bounds)) {
+                syslog().warn("Could not determine desktop bounds");
                 return null;
-            } else {
-                return new Rectangle(0, 0, videoMode.getWidth(), videoMode.getHeight());
             }
+            return new Rectangle(bounds.x(), bounds.y(), bounds.w(), bounds.h());
         }
     }
 
@@ -149,21 +134,21 @@ public abstract class WindowMixin implements MinecraftWindow {
     public void reposition(WindowStyle style, Rectangle newBounds) {
         switch (style) {
             case FULLSCREEN:
-                this.fullscreen = true;
+                this.fullscreenRequested = true;
+                this.fullscreen = false; // force setMode to actually apply it
+                this.setMode();
                 break;
             case WINDOWED:
             case SPLITSCREEN:
-                this.fullscreen = false;
+                this.fullscreenRequested = false;
+                this.fullscreen = true; // force setMode to actually apply it
                 this.windowedX = newBounds.x();
                 this.windowedY = newBounds.y();
                 this.windowedWidth = newBounds.width();
                 this.windowedHeight = newBounds.height();
-                this.x = this.windowedX;
-                this.y = this.windowedY;
-                this.width = this.windowedWidth;
-                this.height = this.windowedHeight;
-                GLFW.glfwSetWindowMonitor(this.handle, 0L, this.x, this.y, this.width, this.height, -1);
-                GLFW.glfwSetWindowAttrib(this.handle, GLFW_DECORATED, style == WindowStyle.WINDOWED ? GLFW_TRUE : GLFW_FALSE);
+                this.setMode();
+                SDLVideo.SDL_SetWindowBordered(this.handle, style == WindowStyle.WINDOWED);
+                // Restoring a layout must not take focus from the keyboard/mouse player.
         }
     }
 }

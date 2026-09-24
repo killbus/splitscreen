@@ -12,7 +12,8 @@ public interface MinecraftWindow {
     Rectangle getWindowBounds();
 
     /**
-     * @return the bounding rectangle for the screen the window is on.
+     * @return the desktop bounds of the display containing the window, in window
+     * coordinates (not framebuffer pixels), or null if the display is unavailable.
      */
     Rectangle getScreenBounds();
 

@@ -53,7 +53,7 @@ public class Mod {
         return SingletonHolder.INSTANCE;
     }
 
-    private Mod() {}
+    Mod() {}
 
     // ======================================================================
     // Fields
@@ -61,13 +61,15 @@ public class Mod {
     private static final String MODE_PROP = "mode";
     private static final String GAP_PROP = "gap";
 
-    private MinecraftWindow unpositionedWindow;
+    private MinecraftWindow pendingWindow;
     private List<WindowMode> modes;
     private int gap = 1;
     private Properties config;
     private Path configPath;
     private int currentModeIndex = 0;
     private Rectangle savedWindowRect;
+    private boolean initialPositionApplied;
+    private boolean positioningWindow;
 
     // ======================================================================
     // Public methods
@@ -103,11 +105,6 @@ public class Mod {
                     currentModeIndex = 0;
                 }
             }
-            if (this.unpositionedWindow != null) {
-                // Deal with timing challenge in NeoForge
-                repositionWindow(this.unpositionedWindow);
-                unpositionedWindow = null;
-            }
         } catch (Exception e) {
             syslog().error(e);
         }
@@ -117,14 +114,23 @@ public class Mod {
      * Called when the minecraft window is created.
      */
     public void onWindowCreate(final MinecraftWindow window) {
-        if (this.modes == null) {
-            // NeoForge creates the window before the mods are initialized, which makes
-            // our life slightly harder.
-            if (this.unpositionedWindow != null) syslog().error("Multiple windows created?");
-            this.unpositionedWindow = requireNonNull(window);
-        } else {
-            repositionWindow(window);
-        }
+        // 26.2 can fire framebuffer resize callbacks during Window construction.
+        // Delay the initial reposition until a later UI hook when Minecraft.window exists.
+        if (this.pendingWindow != null && this.pendingWindow != window) syslog().error("Multiple windows created?");
+        this.pendingWindow = requireNonNull(window);
+    }
+
+    /**
+     * Called once the title screen is initializing and the client window is safe
+     * to manipulate.
+     */
+    public void onUiReady(final MinecraftWindow window) {
+        if (this.initialPositionApplied || this.positioningWindow) return;
+        final MinecraftWindow target = window != null ? window : this.pendingWindow;
+        if (target == null || this.modes == null) return;
+        repositionWindow(target);
+        this.pendingWindow = null;
+        this.initialPositionApplied = true;
     }
 
     /**
@@ -144,7 +150,15 @@ public class Mod {
      * If the resolution changes, we want need to reposition the window.
      */
     public void onResolutionChange(final MinecraftWindow window) {
-        repositionWindow(window);
+        // Initial placement belongs to onUiReady. A framebuffer callback can
+        // arrive during construction, or be caused by our own mode change.
+        if (!this.initialPositionApplied || this.positioningWindow || this.modes == null) return;
+        final WindowMode mode = this.modes.get(this.currentModeIndex);
+        if (mode.getStyle() != WindowStyle.SPLITSCREEN) return;
+        final Rectangle bounds = mode.getRepositionedBoundsFor(window);
+        if (bounds != null && !bounds.equals(window.getWindowBounds())) {
+            applyBounds(window, mode.getStyle(), bounds);
+        }
     }
 
     public void onSetMode(final MinecraftWindow window) {
@@ -167,7 +181,18 @@ public class Mod {
         if (mode == null) {
             syslog().error("Failed to determine mode.");
         } else {
-            window.reposition(mode.getStyle(), mode.getRepositionedBoundsFor(window));
+            final Rectangle bounds = mode.getRepositionedBoundsFor(window);
+            if (bounds != null) applyBounds(window, mode.getStyle(), bounds);
+        }
+    }
+
+    private void applyBounds(final MinecraftWindow window, final WindowStyle style, final Rectangle bounds) {
+        if (this.positioningWindow) return;
+        this.positioningWindow = true;
+        try {
+            window.reposition(style, bounds);
+        } finally {
+            this.positioningWindow = false;
         }
     }
 
