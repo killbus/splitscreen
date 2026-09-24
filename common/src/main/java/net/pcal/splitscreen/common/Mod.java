@@ -53,7 +53,7 @@ public class Mod {
         return SingletonHolder.INSTANCE;
     }
 
-    private Mod() {}
+    Mod() {}
 
     // ======================================================================
     // Fields
@@ -69,6 +69,7 @@ public class Mod {
     private int currentModeIndex = 0;
     private Rectangle savedWindowRect;
     private boolean initialPositionApplied;
+    private boolean positioningWindow;
 
     // ======================================================================
     // Public methods
@@ -124,7 +125,7 @@ public class Mod {
      * to manipulate.
      */
     public void onUiReady(final MinecraftWindow window) {
-        if (this.initialPositionApplied) return;
+        if (this.initialPositionApplied || this.positioningWindow) return;
         final MinecraftWindow target = window != null ? window : this.pendingWindow;
         if (target == null || this.modes == null) return;
         repositionWindow(target);
@@ -149,11 +150,30 @@ public class Mod {
      * If the resolution changes, we want need to reposition the window.
      */
     public void onResolutionChange(final MinecraftWindow window) {
-        repositionWindow(window);
+        // Initial placement belongs to onUiReady. A framebuffer callback can
+        // arrive during construction, or be caused by our own mode change.
+        if (!this.initialPositionApplied || this.positioningWindow || this.modes == null) return;
+        final WindowMode mode = this.modes.get(this.currentModeIndex);
+        if (mode.getStyle() != WindowStyle.SPLITSCREEN) return;
+        final Rectangle bounds = mode.getRepositionedBoundsFor(window);
+        if (bounds != null && !bounds.equals(window.getWindowBounds())) {
+            applyBounds(window, mode.getStyle(), bounds);
+        }
     }
 
     public void onSetMode(final MinecraftWindow window) {
         repositionWindow(window);
+    }
+
+    /**
+     * Opening a menu releases relative mouse mode, but a split-screen cursor
+     * should remain inside its window. Background windows defer the update.
+     */
+    public void onMouseRelease(final MinecraftWindow window) {
+        if (!this.initialPositionApplied || this.positioningWindow || this.modes == null) return;
+        if (this.modes.get(this.currentModeIndex).getStyle() == WindowStyle.SPLITSCREEN) {
+            window.setMouseConfined(true);
+        }
     }
 
     // ======================================================================
@@ -172,7 +192,19 @@ public class Mod {
         if (mode == null) {
             syslog().error("Failed to determine mode.");
         } else {
-            window.reposition(mode.getStyle(), mode.getRepositionedBoundsFor(window));
+            final Rectangle bounds = mode.getRepositionedBoundsFor(window);
+            if (bounds != null) applyBounds(window, mode.getStyle(), bounds);
+        }
+    }
+
+    private void applyBounds(final MinecraftWindow window, final WindowStyle style, final Rectangle bounds) {
+        if (this.positioningWindow) return;
+        this.positioningWindow = true;
+        try {
+            window.reposition(style, bounds);
+            window.setMouseConfined(style == WindowStyle.SPLITSCREEN);
+        } finally {
+            this.positioningWindow = false;
         }
     }
 

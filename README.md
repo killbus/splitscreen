@@ -9,6 +9,10 @@ restart the game.
 This makes it easier for you to start two or more copies of Minecraft and have the windows be positioned automatically 
 for splitscreen.
 
+In split-screen layouts, the mouse cursor stays inside the active window, including in inventories and menus.
+Use `Alt+Tab` (or your operating system's window switcher) to switch instances; losing focus releases the cursor.
+Cycling back to ordinary windowed or fullscreen mode removes this additional constraint.
+
 This mod is designed to be used in conjunction with a Minecraft launcher (such as [PrismLauncher](https://prismlauncher.org/)) and
 a gamepad mod (such [Midnight Controls](https://modrinth.com/mod/midnightcontrols))
 
