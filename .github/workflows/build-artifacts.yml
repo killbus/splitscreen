@@ -1,0 +1,60 @@
+name: Build Artifacts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        run: ./gradlew test build --no-daemon
+
+      - name: Upload Fabric artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splitscreen-fabric-${{ github.sha }}
+          path: fabric/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload NeoForge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splitscreen-neoforge-${{ github.sha }}
+          path: neoforge/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Generate build summary
+        shell: bash
+        run: |
+          {
+            echo "## Build Artifacts"
+            echo
+            echo "### Fabric"
+            find fabric/build/libs -maxdepth 1 -name '*.jar' -printf '%f (%k KiB)\n' | sort | sed 's/^/- /'
+            echo
+            echo "### NeoForge"
+            find neoforge/build/libs -maxdepth 1 -name '*.jar' -printf '%f (%k KiB)\n' | sort | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
