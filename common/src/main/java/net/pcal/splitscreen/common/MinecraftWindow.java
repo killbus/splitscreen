@@ -12,7 +12,8 @@ public interface MinecraftWindow {
     Rectangle getWindowBounds();
 
     /**
-     * @return the bounding rectangle for the screen the window is on.
+     * @return the desktop bounds of the display containing the window, in window
+     * coordinates (not framebuffer pixels), or null if the display is unavailable.
      */
     Rectangle getScreenBounds();
 
@@ -21,6 +22,16 @@ public interface MinecraftWindow {
      * Reposition the window according to the given style and bounds.
      */
     void reposition(WindowStyle style, Rectangle newBounds);
+
+    /**
+     * Confine the cursor while this window has input focus, without changing
+     * cursor visibility or relative mouse mode. Losing focus releases the
+     * constraint; regaining focus restores it until confinement is disabled.
+     */
+    void setMouseConfined(boolean confined);
+
+    /** Apply any deferred constraint when the window regains real input focus. */
+    void updateMouseConfinement();
 
     record Rectangle(int x, int y, int width, int height) {}
 }
