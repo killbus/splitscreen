@@ -10,9 +10,17 @@ repositories {
 }
 
 dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"    
     compileOnly "org.spongepowered:mixin:${project.spongepowered_version}"
     annotationProcessor "org.spongepowered:mixin:${project.spongepowered_version}:processor"
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }
 
 loom {
