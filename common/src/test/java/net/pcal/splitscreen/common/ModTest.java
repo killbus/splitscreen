@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -140,6 +141,120 @@ class ModTest {
         Rectangle original = window.bounds;
         mod.onUiReady(window);
         mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(original, window.bounds);
+    }
+
+    @Test
+    void borderlessFullscreenLoadsAsAnOrdinaryBorderlessWindow() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        mod.onWindowCreate(window);
+        mod.onResolutionChange(window);
+        assertEquals(0, window.repositions);
+
+        mod.onUiReady(window);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(1, window.repositions);
+    }
+
+    @Test
+    void borderlessFullscreenPersistsAndStillCyclesThroughNativeFullscreenAndWindowed() throws IOException {
+        Mod mod = createMod("BOTTOM_RIGHT");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        mod.onUiReady(window);
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+        assertEquals(window.screen, window.bounds);
+
+        Properties saved = new Properties();
+        try (var reader = Files.newBufferedReader(configDir.resolve("splitscreen.properties"))) {
+            saved.load(reader);
+        }
+        assertEquals("BORDERLESS_FULLSCREEN", saved.getProperty("mode"));
+        assertEquals("1", saved.getProperty("gap"));
+
+        Mod restarted = new Mod();
+        restarted.onModInitialize(configDir);
+        FakeWindow restartedWindow = new FakeWindow();
+        restarted.onUiReady(restartedWindow);
+        assertEquals(WindowStyle.SPLITSCREEN, restartedWindow.style);
+        assertEquals(restartedWindow.screen, restartedWindow.bounds);
+
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.FULLSCREEN, window.style);
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(original, window.bounds);
+    }
+
+    @Test
+    void borderlessResizeIsIdempotentAndDoesNotReenterPlacement() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        window.duringReposition = () -> {
+            mod.onResolutionChange(window);
+            mod.onSetMode(window);
+        };
+        mod.onUiReady(window);
+        mod.onResolutionChange(window);
+        assertEquals(1, window.repositions);
+
+        window.screen = new Rectangle(-3840, -2160, 3840, 2160);
+        mod.onResolutionChange(window);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(2, window.repositions);
+        mod.onResolutionChange(window);
+        assertEquals(2, window.repositions);
+    }
+
+    @Test
+    void borderlessWaitsForAnAvailableDisplay() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        window.screen = null;
+        mod.onUiReady(window);
+        assertEquals(original, window.bounds);
+        assertEquals(0, window.repositions);
+
+        window.screen = new Rectangle(-1920, 0, 1920, 1080);
+        mod.onResolutionChange(window);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+    }
+
+    @Test
+    void instancesKeepIndependentLayoutsOnDifferentDisplays() throws IOException {
+        Mod first = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow firstWindow = new FakeWindow();
+        firstWindow.screen = new Rectangle(-1920, 0, 1920, 1080);
+        first.onUiReady(firstWindow);
+
+        Path secondConfig = Files.createDirectory(configDir.resolve("second"));
+        Files.writeString(secondConfig.resolve("splitscreen.properties"), "mode=BORDERLESS_FULLSCREEN\n");
+        Mod second = new Mod();
+        second.onModInitialize(secondConfig);
+        FakeWindow secondWindow = new FakeWindow();
+        second.onUiReady(secondWindow);
+
+        assertEquals(firstWindow.screen, firstWindow.bounds);
+        assertEquals(secondWindow.screen, secondWindow.bounds);
+        second.onToggleFullscreen(secondWindow);
+        assertEquals(WindowStyle.FULLSCREEN, secondWindow.style);
+        assertEquals(WindowStyle.SPLITSCREEN, firstWindow.style);
+        assertEquals(firstWindow.screen, firstWindow.bounds);
+        assertEquals(1, firstWindow.repositions);
+    }
+
+    @Test
+    void unknownSavedModeStillFallsBackToWindowed() throws IOException {
+        Mod mod = createMod("UNKNOWN_MODE");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        mod.onUiReady(window);
         assertEquals(WindowStyle.WINDOWED, window.style);
         assertEquals(original, window.bounds);
     }

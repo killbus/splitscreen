@@ -79,9 +79,6 @@ public abstract class WindowMixin implements MinecraftWindow {
     private int height;
     @Shadow
     private boolean fullscreen;
-    @Shadow
-    private Optional<VideoMode> preferredFullscreenVideoMode;
-
 
     @Shadow
     public abstract boolean isFullscreen();
@@ -130,7 +127,8 @@ public abstract class WindowMixin implements MinecraftWindow {
             syslog().warn("Could not determine Monitor");
             return null;
         } else {
-            final VideoMode videoMode = monitor.getPreferredVidMode(this.preferredFullscreenVideoMode);
+            // Windowed layouts use the desktop mode, not the configured fullscreen resolution.
+            final VideoMode videoMode = monitor.getPreferredVidMode(Optional.empty());
             if (videoMode == null) {
                 syslog().warn("Could not determine VideoMode");
                 return null;
