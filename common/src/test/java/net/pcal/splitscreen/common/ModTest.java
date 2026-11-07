@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -108,7 +109,7 @@ class ModTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"LEFT", "RIGHT", "TOP", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT"})
+    @ValueSource(strings = {"LEFT", "RIGHT", "TOP", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "BORDERLESS_FULLSCREEN"})
     void menuReleaseKeepsSplitCursorConfinedWithoutRepositioning(String mode) throws IOException {
         Mod mod = createMod(mode);
         FakeWindow window = new FakeWindow();
@@ -147,6 +148,9 @@ class ModTest {
         mod.onUiReady(window);
         assertTrue(window.mouseConfined);
 
+        mod.onToggleFullscreen(window); // BORDERLESS_FULLSCREEN
+        assertTrue(window.mouseConfined);
+        assertEquals(window.screen, window.bounds);
         mod.onToggleFullscreen(window); // FULLSCREEN
         assertFalse(window.mouseConfined);
         mod.onToggleFullscreen(window); // WINDOWED
@@ -173,9 +177,164 @@ class ModTest {
         assertEquals(2, window.confinementUpdates);
     }
 
+    @Test
+    void cyclingBackToWindowedRestoresTheLatestOrdinaryWindowBounds() throws IOException {
+        Mod mod = createMod("WINDOWED");
+        FakeWindow window = new FakeWindow();
+        mod.onUiReady(window);
+        Rectangle resized = new Rectangle(-1700, 80, 1200, 800);
+        window.bounds = resized;
+        window.screen = new Rectangle(-1920, 0, 1920, 1080);
+
+        for (int i = 0; i < WindowMode.getModes(1).size(); i++) mod.onToggleFullscreen(window);
+
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(resized, window.bounds);
+        assertFalse(window.mouseConfined);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"BORDERLESS_FULLSCREEN", "FULLSCREEN"})
+    void restoredLayoutDoesNotOverwriteTheInitialOrdinaryWindowBounds(String mode) throws IOException {
+        Mod mod = createMod(mode);
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        mod.onUiReady(window);
+        if (mode.equals("BORDERLESS_FULLSCREEN")) mod.onToggleFullscreen(window);
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(original, window.bounds);
+    }
+
+    @Test
+    void borderlessFullscreenLoadsAsAnOrdinaryBorderlessWindow() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        mod.onWindowCreate(window);
+        mod.onResolutionChange(window);
+        assertEquals(0, window.repositions);
+
+        mod.onUiReady(window);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(1, window.repositions);
+        assertTrue(window.mouseConfined);
+    }
+
+    @Test
+    void borderlessFullscreenPersistsAndStillCyclesThroughNativeFullscreenAndWindowed() throws IOException {
+        Mod mod = createMod("BOTTOM_RIGHT");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        mod.onUiReady(window);
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+        assertEquals(window.screen, window.bounds);
+
+        Properties saved = new Properties();
+        try (var reader = Files.newBufferedReader(configDir.resolve("splitscreen.properties"))) {
+            saved.load(reader);
+        }
+        assertEquals("BORDERLESS_FULLSCREEN", saved.getProperty("mode"));
+        assertEquals("1", saved.getProperty("gap"));
+
+        Mod restarted = new Mod();
+        restarted.onModInitialize(configDir);
+        FakeWindow restartedWindow = new FakeWindow();
+        restarted.onUiReady(restartedWindow);
+        assertEquals(WindowStyle.SPLITSCREEN, restartedWindow.style);
+        assertEquals(restartedWindow.screen, restartedWindow.bounds);
+
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.FULLSCREEN, window.style);
+        mod.onToggleFullscreen(window);
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(original, window.bounds);
+    }
+
+    @Test
+    void borderlessResizeIsIdempotentAndDoesNotReenterPlacement() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        window.duringReposition = () -> {
+            mod.onUiReady(window);
+            mod.onResolutionChange(window);
+            mod.onSetMode(window);
+            mod.onMouseRelease(window);
+        };
+        mod.onUiReady(window);
+        mod.onResolutionChange(window);
+        assertEquals(1, window.repositions);
+        assertEquals(1, window.confinementUpdates);
+
+        window.screen = new Rectangle(-3840, -2160, 3840, 2160);
+        mod.onResolutionChange(window);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(2, window.repositions);
+        assertEquals(2, window.confinementUpdates);
+        mod.onResolutionChange(window);
+        assertEquals(2, window.repositions);
+        assertEquals(2, window.confinementUpdates);
+    }
+
+    @Test
+    void borderlessWaitsForAnAvailableDisplay() throws IOException {
+        Mod mod = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        window.screen = null;
+        mod.onUiReady(window);
+        assertEquals(original, window.bounds);
+        assertEquals(0, window.repositions);
+        assertEquals(0, window.confinementUpdates);
+
+        window.screen = new Rectangle(-1920, 0, 1920, 1080);
+        mod.onResolutionChange(window);
+        assertEquals(window.screen, window.bounds);
+        assertEquals(WindowStyle.SPLITSCREEN, window.style);
+        assertTrue(window.mouseConfined);
+    }
+
+    @Test
+    void instancesKeepIndependentLayoutsOnDifferentDisplays() throws IOException {
+        Mod first = createMod("BORDERLESS_FULLSCREEN");
+        FakeWindow firstWindow = new FakeWindow();
+        firstWindow.screen = new Rectangle(-1920, 0, 1920, 1080);
+        first.onUiReady(firstWindow);
+
+        Path secondConfig = Files.createDirectory(configDir.resolve("second"));
+        Files.writeString(secondConfig.resolve("splitscreen.properties"), "mode=BORDERLESS_FULLSCREEN\n");
+        Mod second = new Mod();
+        second.onModInitialize(secondConfig);
+        FakeWindow secondWindow = new FakeWindow();
+        second.onUiReady(secondWindow);
+
+        assertEquals(firstWindow.screen, firstWindow.bounds);
+        assertEquals(secondWindow.screen, secondWindow.bounds);
+        second.onToggleFullscreen(secondWindow);
+        assertEquals(WindowStyle.FULLSCREEN, secondWindow.style);
+        assertFalse(secondWindow.mouseConfined);
+        assertEquals(WindowStyle.SPLITSCREEN, firstWindow.style);
+        assertEquals(firstWindow.screen, firstWindow.bounds);
+        assertTrue(firstWindow.mouseConfined);
+        assertEquals(1, firstWindow.repositions);
+        assertEquals(1, firstWindow.confinementUpdates);
+    }
+
+    @Test
+    void unknownSavedModeStillFallsBackToWindowed() throws IOException {
+        Mod mod = createMod("UNKNOWN_MODE");
+        FakeWindow window = new FakeWindow();
+        Rectangle original = window.bounds;
+        mod.onUiReady(window);
+        assertEquals(WindowStyle.WINDOWED, window.style);
+        assertEquals(original, window.bounds);
+    }
+
     private static class FakeWindow implements MinecraftWindow {
         Rectangle bounds = new Rectangle(2000, 100, 854, 480);
         Rectangle screen = new Rectangle(1920, 0, 2560, 1440);
+        WindowStyle style;
         int repositions;
         boolean mouseConfined;
         int confinementUpdates;
@@ -191,7 +350,8 @@ class ModTest {
         public void reposition(WindowStyle style, Rectangle bounds) {
             repositions++;
             duringReposition.run();
-            if (style != WindowStyle.FULLSCREEN) this.bounds = bounds;
+            this.style = style;
+            this.bounds = style == WindowStyle.FULLSCREEN ? screen : bounds;
         }
 
         @Override

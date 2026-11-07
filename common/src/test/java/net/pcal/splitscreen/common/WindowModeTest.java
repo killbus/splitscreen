@@ -95,7 +95,33 @@ class WindowModeTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"LEFT", "RIGHT", "TOP", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT"})
+    @ValueSource(ints = {0, 1, 32})
+    void borderlessFullscreenCoversTheDesktopWithoutApplyingTheGap(int gap) {
+        final WindowMode mode = mode("BORDERLESS_FULLSCREEN", gap);
+        assertEquals(WindowStyle.SPLITSCREEN, mode.getStyle());
+        for (Rectangle screen : SCREENS) {
+            final ChangingWindow window = new ChangingWindow(screen, null);
+            assertEquals(screen, mode.getRepositionedBoundsFor(window));
+            assertEquals(1, window.screenQueries);
+            assertEquals(0, window.windowQueries);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "1920, 0, 3840, 2160",
+            "-2560, -360, 2560, 1440",
+            "0, -1920, 1080, 1920",
+            "-1921, 1081, 1921, 1081"
+    })
+    void borderlessFullscreenPreservesDifferentDesktopSizes(int x, int y, int width, int height) {
+        final Rectangle screen = new Rectangle(x, y, width, height);
+        assertEquals(screen, mode("BORDERLESS_FULLSCREEN", 1)
+                .getRepositionedBoundsFor(new ChangingWindow(screen, null)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"LEFT", "RIGHT", "TOP", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "BORDERLESS_FULLSCREEN"})
     void unavailableScreenReturnsNull(String name) {
         final ChangingWindow window = new ChangingWindow(null, new Rectangle(10, 20, 800, 600));
 
@@ -105,10 +131,11 @@ class WindowModeTest {
     }
 
     @Test
-    void modeNamesAndOrderStayUnchanged() {
+    void borderlessFullscreenIsInsertedBeforeNativeFullscreen() {
         assertEquals(List.of("WINDOWED", "LEFT", "RIGHT", "TOP", "BOTTOM", "TOP_LEFT", "TOP_RIGHT",
-                        "BOTTOM_LEFT", "BOTTOM_RIGHT", "FULLSCREEN"),
+                        "BOTTOM_LEFT", "BOTTOM_RIGHT", "BORDERLESS_FULLSCREEN", "FULLSCREEN"),
                 WindowMode.getModes(0).stream().map(WindowMode::getName).toList());
+        assertEquals(WindowStyle.FULLSCREEN, mode("FULLSCREEN", 0).getStyle());
     }
 
     private static WindowMode mode(String name, int gap) {

@@ -128,6 +128,7 @@ public class Mod {
         if (this.initialPositionApplied || this.positioningWindow) return;
         final MinecraftWindow target = window != null ? window : this.pendingWindow;
         if (target == null || this.modes == null) return;
+        if (this.savedWindowRect == null) this.savedWindowRect = target.getWindowBounds();
         repositionWindow(target);
         this.pendingWindow = null;
         this.initialPositionApplied = true;
@@ -192,7 +193,8 @@ public class Mod {
         if (mode == null) {
             syslog().error("Failed to determine mode.");
         } else {
-            final Rectangle bounds = mode.getRepositionedBoundsFor(window);
+            final Rectangle bounds = mode.getStyle() == WindowStyle.WINDOWED && this.savedWindowRect != null
+                    ? this.savedWindowRect : mode.getRepositionedBoundsFor(window);
             if (bounds != null) applyBounds(window, mode.getStyle(), bounds);
         }
     }

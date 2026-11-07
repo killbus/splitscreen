@@ -91,6 +91,8 @@ record WindowMode(
                 r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
         addMode(modes, "BOTTOM_RIGHT", SPLITSCREEN, r -> r.x() + r.width() / 2 + gap, r -> r.y() + r.height() / 2 + gap,
                 r -> r.width() / 2 - gap, r -> r.height() / 2 - gap);
+        // Covering a whole monitor still uses the ordinary borderless window path.
+        addMode(modes, "BORDERLESS_FULLSCREEN", SPLITSCREEN, r -> r.x(), r -> r.y(), r -> r.width(), r -> r.height());
         addMode(modes, "FULLSCREEN", FULLSCREEN, no(), no(), no(), no());
         return modes;
     }
